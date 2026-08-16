@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom';
 import axios from 'axios';
 import { PHISH_SHOWS } from '../data/phishShows';
 
-const CATEGORIES = ['Electronics', 'Clothing', 'Furniture', 'Books', 'Sports', 'Collectibles', 'Other'];
 
 export default function Home() {
   const [listings, setListings] = useState([]);
@@ -54,7 +53,7 @@ export default function Home() {
       <div className="bg-blue-600 text-white py-12">
         <div className="max-w-7xl mx-auto px-4">
           <h1 className="text-4xl font-bold mb-4">TicketTrade</h1>
-          <p className="text-xl text-blue-100">Buy and sell items at fair prices, capped at original value</p>
+          <p className="text-xl text-blue-100">Fair-price Phish tickets. Face value only, no markup.</p>
         </div>
       </div>
 
@@ -64,12 +63,6 @@ export default function Home() {
             <div className="flex gap-2">
               <input type="text" placeholder="Search listings..." value={search} onChange={(e) => setSearch(e.target.value)} className="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <button type="submit" className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Search</button>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => { setCategory(''); setPage(1); }} className={`px-4 py-2 rounded-lg font-medium ${!category ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}>All Categories</button>
-              {CATEGORIES.map((cat) => (
-                <button key={cat} type="button" onClick={() => { setCategory(cat); setPage(1); }} className={`px-4 py-2 rounded-lg font-medium ${category === cat ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-800 hover:bg-gray-300'}`}>{cat}</button>
-              ))}
             </div>
           </form>
         </div>
