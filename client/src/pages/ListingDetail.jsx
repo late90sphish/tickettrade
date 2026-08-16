@@ -1,6 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements } from '@stripe/react-stripe-js';
+import PaymentModal from '../components/PaymentModal';
+
+let stripePromise = null;
+function getStripe() {
+  if (!stripePromise) {
+    stripePromise = axios
+      .get('/api/payments/config')
+      .then((res) => loadStripe(res.data.publishable_key))
+      .catch(() => null);
+  }
+  return stripePromise;
+}
 
 export default function ListingDetail() {
   const { id } = useParams();
@@ -14,9 +28,12 @@ export default function ListingDetail() {
   const [submittingOffer, setSubmittingOffer] = useState(false);
   const [transaction, setTransaction] = useState(null);
   const [confirmingReceipt, setConfirmingReceipt] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
+  const [stripeInstance, setStripeInstance] = useState(null);
 
   useEffect(() => {
     fetchListing();
+    getStripe().then(setStripeInstance);
   }, [id]);
 
   const fetchListing = async () => {
@@ -39,41 +56,6 @@ export default function ListingDetail() {
       alert('Please enter a valid offer price');
       return;
     }
-  const handleConfirmReceipt = async () => {
-    if (!window.confirm('Did you receive the ticket? This will release payment to the seller.')) {
-      return;
-    }
-    const handlePayment = async () => {
-    if (!window.confirm(`Confirm payment of $${totalBuyerPays.toFixed(2)}? Your money will be held in escrow until you confirm receipt.`)) {
-      return;
-    }
-    try {
-      const intentResponse = await axios.post('/api/payments/create-intent', {
-        listing_id: id,
-        amount: totalBuyerPays,
-      });
-      const confirmResponse = await axios.post('/api/payments/confirm', {
-        listing_id: id,
-        payment_intent_id: intentResponse.data.payment_intent_id,
-        amount: totalBuyerPays,
-      });
-      setTransaction(confirmResponse.data.transaction);
-      alert('Payment successful! Money held in escrow. Confirm receipt when you get the ticket.');
-    } catch (err) {
-      alert(err.response?.data?.error || 'Payment failed');
-    }
-  };
-    setConfirmingReceipt(true);
-    try {
-      await axios.post(`/api/transactions/${transaction.id}/confirm-received`);
-      alert('Receipt confirmed! Payment released to seller.');
-      setTransaction(prev => ({ ...prev, status: 'completed', buyer_confirmed_at: new Date().toISOString() }));
-    } catch (err) {
-      alert(err.response?.data?.error || 'Failed to confirm receipt');
-    } finally {
-      setConfirmingReceipt(false);
-    }
-  };
     setSubmittingOffer(true);
     try {
       await axios.post('/api/offers', {
@@ -92,6 +74,28 @@ export default function ListingDetail() {
     }
   };
 
+  const handleConfirmReceipt = async () => {
+    if (!window.confirm('Did you receive the ticket? This will release payment to the seller.')) {
+      return;
+    }
+    setConfirmingReceipt(true);
+    try {
+      await axios.post(`/api/transactions/${transaction.id}/confirm-received`);
+      alert('Receipt confirmed! Payment released to seller.');
+      setTransaction((prev) => ({ ...prev, status: 'completed', buyer_confirmed_at: new Date().toISOString() }));
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to confirm receipt');
+    } finally {
+      setConfirmingReceipt(false);
+    }
+  };
+
+  const handlePaymentSuccess = (txn) => {
+    setTransaction(txn);
+    setShowPayment(false);
+    alert('Payment successful! Money held in escrow. Confirm receipt when you get the ticket.');
+  };
+
   const totalBuyerPays = listing ? (listing.seller_covers_fees ? listing.asking_price : listing.asking_price + (listing.asking_price * 0.054) + 0.30) : 0;
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-center"><div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div><p className="mt-4">Loading listing...</p></div></div>;
@@ -102,7 +106,7 @@ export default function ListingDetail() {
     <div className="min-h-screen bg-gray-50 py-12">
       <div className="max-w-6xl mx-auto px-4">
         <button onClick={() => navigate('/')} className="mb-6 px-4 py-2 text-blue-600 hover:bg-blue-50 rounded-lg">← Back to listings</button>
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <div className="bg-white rounded-lg shadow">
@@ -116,7 +120,7 @@ export default function ListingDetail() {
                 <h1 className="text-3xl font-bold text-gray-900 mb-4">{listing.title}</h1>
                 {listing.show_date && <p className="text-sm text-gray-600 mb-4">📅 {new Date(listing.show_date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>}
                 <p className="text-gray-700 mb-6">{listing.description}</p>
-                
+
                 <div className="grid grid-cols-2 gap-4 bg-gray-50 p-4 rounded-lg mb-6">
                   <div>
                     <p className="text-xs text-gray-600 mb-1">Face Value</p>
@@ -159,7 +163,8 @@ export default function ListingDetail() {
                 <p className="text-xs text-gray-600 mb-2">{listing.seller.completed_sales} sales completed</p>
                 <button onClick={() => navigate(`/users/${listing.seller.id}`)} className="w-full px-3 py-2 text-sm border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50">View Profile</button>
               </div>
-{transaction && (
+
+              {transaction && (
                 <div className="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                   <p className="text-sm font-medium text-gray-900 mb-2">Transaction Status</p>
                   <p className="text-xs text-gray-600 mb-3">
@@ -173,12 +178,12 @@ export default function ListingDetail() {
                 </div>
               )}
 
-              {listing.accepts_offers ? (
-                <>
-                  {!showOfferForm ? (
+              {!transaction && (
+                listing.accepts_offers ? (
+                  !showOfferForm ? (
                     <>
                       <button onClick={() => setShowOfferForm(true)} className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium mb-2">Make Offer</button>
-                      <button className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Pay Full Price</button>
+                      <button onClick={() => setShowPayment(true)} className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Pay Full Price</button>
                     </>
                   ) : (
                     <form onSubmit={handleMakeOffer} className="space-y-3">
@@ -191,10 +196,10 @@ export default function ListingDetail() {
                         <button type="button" onClick={() => setShowOfferForm(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">Cancel</button>
                       </div>
                     </form>
-                  )}
-                </>
-              ) : (
-                <button onClick={handlePayment} className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Paed(2)}</button>
+                  )
+                ) : (
+                  <button onClick={() => setShowPayment(true)} className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Pay ${totalBuyerPays.toFixed(2)}</button>
+                )
               )}
 
               <p className="text-xs text-gray-500 mt-4 text-center">💳 Secured by Stripe<br/>✓ Buyer protected with escrow</p>
@@ -202,6 +207,25 @@ export default function ListingDetail() {
           </div>
         </div>
       </div>
+
+      {showPayment && stripeInstance && (
+        <Elements stripe={stripeInstance}>
+          <PaymentModal
+            listing={listing}
+            amount={totalBuyerPays}
+            onClose={() => setShowPayment(false)}
+            onSuccess={handlePaymentSuccess}
+          />
+        </Elements>
+      )}
+      {showPayment && !stripeInstance && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 text-center">
+            <p className="text-gray-700 mb-4">Payments aren't set up yet. Add your Stripe keys to enable checkout.</p>
+            <button onClick={() => setShowPayment(false)} className="px-4 py-2 bg-gray-200 rounded-lg">Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

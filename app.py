@@ -441,6 +441,11 @@ def get_my_transactions():
     }), 200
 
 
+@app.route('/api/payments/config', methods=['GET'])
+def payment_config():
+    return jsonify({'publishable_key': os.getenv('STRIPE_PUBLIC_KEY', '')}), 200
+
+
 @app.route('/api/payments/create-intent', methods=['POST'])
 @jwt_required()
 def create_payment_intent():
@@ -471,24 +476,39 @@ def confirm_payment():
     buyer_id = get_jwt_identity()
     data = request.get_json()
     
-    if not data.get('listing_id') or not data.get('payment_intent_id') or not data.get('amount'):
+    if not data.get('listing_id') or not data.get('payment_intent_id'):
         return jsonify({'error': 'Missing required fields'}), 400
     
     listing = Listing.query.get(data['listing_id'])
     if not listing:
         return jsonify({'error': 'Listing not found'}), 404
-    
+
+    # Verify with Stripe that the payment actually succeeded before recording anything.
+    try:
+        intent = stripe.PaymentIntent.retrieve(data['payment_intent_id'])
+    except Exception as e:
+        return jsonify({'error': 'Could not verify payment: ' + str(e)}), 400
+
+    if intent.status != 'succeeded':
+        return jsonify({'error': 'Payment not completed'}), 400
+
+    # Guard against double-recording the same charge.
+    existing = Transaction.query.filter_by(stripe_payment_intent=data['payment_intent_id']).first()
+    if existing:
+        return jsonify({'message': 'Already recorded', 'transaction': existing.to_dict()}), 200
+
     try:
         transaction = Transaction(
             listing_id=listing.id,
             seller_id=listing.seller_id,
             buyer_id=buyer_id,
-            amount=data['amount'],
+            amount=intent.amount / 100.0,
             stripe_payment_intent=data['payment_intent_id'],
             status='escrow_held',
             escrow_held_at=datetime.utcnow()
         )
         db.session.add(transaction)
+        listing.status = 'sold'
         db.session.commit()
         return jsonify({'message': 'Payment confirmed', 'transaction': transaction.to_dict()}), 201
     except Exception as e:
