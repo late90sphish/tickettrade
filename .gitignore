@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *.class
@@ -26,3 +26,6 @@ npm-debug.log
 # Uploads
 uploads/
 !uploads/.gitkeep
+*.db
+instance/
+build/
