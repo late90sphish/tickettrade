@@ -24,7 +24,7 @@ export default function Navbar({ user, onLogout }) {
 
           {user ? (
             <>
-              <Link to="/create-listing" className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm">Sell Item</Link>
+              <Link to="/create-listing" className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm">Sell Tickets</Link>
               <Link to="/dashboard" className="text-gray-700 hover:text-blue-600 font-medium text-sm">Dashboard</Link>
               <div className="relative">
                 <button onClick={() => setMenuOpen(!menuOpen)} className="flex items-center gap-2 text-gray-700 hover:text-blue-600">

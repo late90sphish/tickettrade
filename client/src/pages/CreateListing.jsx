@@ -3,7 +3,6 @@ import { PHISH_SHOWS } from '../data/phishShows';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
-const CONDITIONS = ['New', 'Like New', 'Good', 'Fair'];
 
 export default function CreateListing() {
   const navigate = useNavigate();
@@ -13,7 +12,6 @@ export default function CreateListing() {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    condition: 'Good',
     original_purchase_price: '',
     asking_price: '',
     accepts_offers: true,
@@ -29,6 +27,7 @@ show_date: '',
 
   const validateForm = () => {
     if (!formData.title.trim()) { setError('Title is required'); return false; }
+    if (!formData.description.trim()) { setError('Seat location is required'); return false; }
     if (!formData.original_purchase_price || formData.original_purchase_price <= 0) { setError('Original purchase price required'); return false; }
     if (!formData.asking_price || formData.asking_price <= 0) { setError('Asking price required'); return false; }
     return true;
@@ -42,7 +41,6 @@ show_date: '',
       const response = await axios.post('/api/listings', {
         title: formData.title,
         description: formData.description,
-        condition: formData.condition,
         original_purchase_price: parseFloat(formData.original_purchase_price),
         asking_price: parseFloat(formData.asking_price),
         accepts_offers: formData.accepts_offers,
@@ -75,8 +73,8 @@ show_date: formData.show_date,
             <input type="text" name="title" value={formData.title} onChange={handleInputChange} placeholder="e.g., Phish - Madison Square Garden 12/28/24" className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-            <textarea name="description" value={formData.description} onChange={handleInputChange} placeholder="Section, row, seat number, any notes about the ticket..." rows="3" className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <label className="block text-sm font-medium text-gray-700 mb-2">Seat Location * <span className="font-normal text-gray-500">(section, row, seat)</span></label>
+            <textarea name="description" value={formData.description} onChange={handleInputChange} placeholder="e.g. Section 112, Row K, Seats 5-6 — plus any notes" rows="3" className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Phish Show *</label>
@@ -88,12 +86,6 @@ show_date: formData.show_date,
               {PHISH_SHOWS.map(show => (
                 <option key={show.id} value={show.id}>{new Date(show.date).toLocaleDateString()} - {show.venue}</option>
               ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Condition</label>
-            <select name="condition" value={formData.condition} onChange={handleInputChange} className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-              {CONDITIONS.map(cond => <option key={cond} value={cond}>{cond}</option>)}
             </select>
           </div>
           <div className="grid grid-cols-2 gap-4 bg-blue-50 p-4 rounded-lg border border-blue-200">
