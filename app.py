@@ -185,6 +185,31 @@ class Transaction(db.Model):
             'created_at': self.created_at.isoformat(),
             'escrow_held_at': self.escrow_held_at.isoformat() if self.escrow_held_at else None,
             'buyer_confirmed_at': self.buyer_confirmed_at.isoformat() if self.buyer_confirmed_at else None,
+            'reviewed': Review.query.filter_by(transaction_id=self.id).first() is not None,
+        }
+
+
+class Review(db.Model):
+    __tablename__ = 'reviews'
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    transaction_id = db.Column(db.String(36), db.ForeignKey('transactions.id'), nullable=False, unique=True)
+    reviewer_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    reviewee_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    rating = db.Column(db.Integer, nullable=False)
+    comment = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        reviewer = User.query.get(self.reviewer_id)
+        return {
+            'id': self.id,
+            'transaction_id': self.transaction_id,
+            'reviewer_id': self.reviewer_id,
+            'reviewer_username': reviewer.username if reviewer else 'Unknown',
+            'reviewee_id': self.reviewee_id,
+            'rating': self.rating,
+            'comment': self.comment,
+            'created_at': self.created_at.isoformat(),
         }
 
 
@@ -391,6 +416,68 @@ def confirm_received(transaction_id):
     transaction.buyer_confirmed_at = datetime.utcnow()
     db.session.commit()
     return jsonify({'message': 'Transaction completed', 'transaction': transaction.to_dict()}), 200
+
+
+@app.route('/api/reviews', methods=['POST'])
+@jwt_required()
+def create_review():
+    reviewer_id = get_jwt_identity()
+    data = request.get_json()
+    transaction_id = data.get('transaction_id')
+    rating = data.get('rating')
+
+    if not transaction_id or rating is None:
+        return jsonify({'error': 'Missing transaction or rating'}), 400
+    try:
+        rating = int(rating)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Rating must be a number'}), 400
+    if rating < 1 or rating > 5:
+        return jsonify({'error': 'Rating must be between 1 and 5'}), 400
+
+    transaction = Transaction.query.get(transaction_id)
+    if not transaction:
+        return jsonify({'error': 'Transaction not found'}), 404
+    # Only the buyer on a completed transaction can review, and only the seller.
+    if transaction.buyer_id != reviewer_id:
+        return jsonify({'error': 'Only the buyer can leave a review'}), 403
+    if transaction.status != 'completed':
+        return jsonify({'error': 'You can only review completed transactions'}), 400
+    if Review.query.filter_by(transaction_id=transaction_id).first():
+        return jsonify({'error': 'You already reviewed this transaction'}), 400
+
+    review = Review(
+        transaction_id=transaction_id,
+        reviewer_id=reviewer_id,
+        reviewee_id=transaction.seller_id,
+        rating=rating,
+        comment=data.get('comment', ''),
+    )
+    db.session.add(review)
+    db.session.flush()  # ensure this review is counted in the query below
+
+    # Recalculate the seller's average rating and review count from all their reviews.
+    seller = User.query.get(transaction.seller_id)
+    all_ratings = [r.rating for r in Review.query.filter_by(reviewee_id=seller.id).all()]
+    seller.total_reviews = len(all_ratings)
+    seller.rating = round(sum(all_ratings) / len(all_ratings), 2) if all_ratings else 0.0
+
+    db.session.commit()
+    return jsonify({'message': 'Review submitted', 'review': review.to_dict()}), 201
+
+
+@app.route('/api/users/<user_id>', methods=['GET'])
+def get_user(user_id):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    return jsonify(user.to_dict()), 200
+
+
+@app.route('/api/users/<user_id>/reviews', methods=['GET'])
+def get_user_reviews(user_id):
+    reviews = Review.query.filter_by(reviewee_id=user_id).order_by(Review.created_at.desc()).all()
+    return jsonify({'reviews': [r.to_dict() for r in reviews]}), 200
 
 
 @app.route('/api/offers/<offer_id>/reject', methods=['POST'])

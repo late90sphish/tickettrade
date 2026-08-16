@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import ReviewForm from '../components/ReviewForm';
 
 export default function Dashboard({ user }) {
   const navigate = useNavigate();
@@ -69,6 +70,16 @@ export default function Dashboard({ user }) {
       fetchOffers();
     } catch (err) {
       alert(err.response?.data?.error || 'Failed to reject offer');
+    }
+  };
+
+  const handleConfirmReceipt = async (transactionId) => {
+    if (!window.confirm('Did you receive the ticket? This will release payment to the seller.')) return;
+    try {
+      await axios.post(`/api/transactions/${transactionId}/confirm-received`);
+      fetchTransactions();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to confirm receipt');
     }
   };
 
@@ -147,12 +158,29 @@ export default function Dashboard({ user }) {
                   {purchases.length > 0 ? (
                     <div className="space-y-3">
                       {purchases.map((t) => (
-                        <div key={t.id} className="flex items-center justify-between p-4 border rounded-lg">
-                          <div>
-                            <p className="font-medium text-gray-900">{t.listing?.title || 'Listing'}</p>
-                            <p className="text-sm text-gray-500">${t.amount.toFixed(2)} · {new Date(t.created_at).toLocaleDateString()}</p>
+                        <div key={t.id} className="p-4 border rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-medium text-gray-900">{t.listing?.title || 'Listing'}</p>
+                              <p className="text-sm text-gray-500">${t.amount.toFixed(2)} · {new Date(t.created_at).toLocaleDateString()}</p>
+                            </div>
+                            <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-800">{t.status}</span>
                           </div>
-                          <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-800">{t.status}</span>
+                          {t.status === 'escrow_held' && (
+                            <button onClick={() => handleConfirmReceipt(t.id)} className="mt-3 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm">
+                              ✓ I Received the Ticket
+                            </button>
+                          )}
+                          {t.status === 'completed' && !t.reviewed && (
+                            <ReviewForm
+                              transactionId={t.id}
+                              sellerName={t.listing?.seller?.username || 'the seller'}
+                              onSubmitted={fetchTransactions}
+                            />
+                          )}
+                          {t.status === 'completed' && t.reviewed && (
+                            <p className="mt-2 text-sm text-green-700">✓ You reviewed this purchase</p>
+                          )}
                         </div>
                       ))}
                     </div>

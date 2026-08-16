@@ -7,6 +7,7 @@ export default function UserProfile() {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [listings, setListings] = useState([]);
+  const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -21,6 +22,8 @@ export default function UserProfile() {
       setUser(userResponse.data);
       const listingsResponse = await axios.get('/api/listings', { params: { seller_id: id } });
       setListings(listingsResponse.data.listings);
+      const reviewsResponse = await axios.get(`/api/users/${id}/reviews`);
+      setReviews(reviewsResponse.data.reviews);
     } catch (err) {
       setError('Failed to load user profile');
     } finally {
@@ -115,6 +118,26 @@ export default function UserProfile() {
             </div>
           ) : (
             <div className="bg-white rounded-lg p-8 text-center text-gray-600">No listings</div>
+          )}
+        </div>
+
+        <div className="mt-10">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">Reviews ({reviews.length})</h2>
+          {reviews.length > 0 ? (
+            <div className="space-y-3">
+              {reviews.map((rev) => (
+                <div key={rev.id} className="bg-white rounded-lg shadow p-4">
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="font-medium text-gray-900">{rev.reviewer_username}</p>
+                    <p className="text-yellow-400 text-sm">{'★'.repeat(rev.rating)}<span className="text-gray-300">{'★'.repeat(5 - rev.rating)}</span></p>
+                  </div>
+                  {rev.comment && <p className="text-sm text-gray-700">{rev.comment}</p>}
+                  <p className="text-xs text-gray-400 mt-1">{new Date(rev.created_at).toLocaleDateString()}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg p-8 text-center text-gray-600">No reviews yet</div>
           )}
         </div>
       </div>

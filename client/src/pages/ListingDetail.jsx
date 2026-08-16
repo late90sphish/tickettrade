@@ -4,6 +4,7 @@ import axios from 'axios';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
 import PaymentModal from '../components/PaymentModal';
+import ReviewForm from '../components/ReviewForm';
 
 let stripePromise = null;
 function getStripe() {
@@ -28,6 +29,7 @@ export default function ListingDetail() {
   const [submittingOffer, setSubmittingOffer] = useState(false);
   const [transaction, setTransaction] = useState(null);
   const [confirmingReceipt, setConfirmingReceipt] = useState(false);
+  const [reviewed, setReviewed] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [stripeInstance, setStripeInstance] = useState(null);
 
@@ -174,6 +176,16 @@ export default function ListingDetail() {
                     <button onClick={handleConfirmReceipt} disabled={confirmingReceipt} className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 font-medium text-sm">
                       {confirmingReceipt ? 'Confirming...' : '✓ I Received the Ticket'}
                     </button>
+                  )}
+                  {transaction.status === 'completed' && !reviewed && !transaction.reviewed && (
+                    <ReviewForm
+                      transactionId={transaction.id}
+                      sellerName={listing.seller.username}
+                      onSubmitted={() => setReviewed(true)}
+                    />
+                  )}
+                  {transaction.status === 'completed' && (reviewed || transaction.reviewed) && (
+                    <p className="mt-3 text-sm text-green-700">✓ Thanks for your review!</p>
                   )}
                 </div>
               )}
