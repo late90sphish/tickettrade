@@ -83,6 +83,43 @@ export default function Dashboard({ user }) {
     }
   };
 
+  const handleMarkTransferred = async (transactionId) => {
+    if (!window.confirm('Confirm you have transferred the ticket to the buyer via Ticketmaster?')) return;
+    try {
+      await axios.post(`/api/transactions/${transactionId}/mark-transferred`);
+      fetchTransactions();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to mark transferred');
+    }
+  };
+
+  const handleCancel = async (transactionId) => {
+    if (!window.confirm('Cancel this purchase and refund yourself? The seller missed the transfer window.')) return;
+    try {
+      await axios.post(`/api/transactions/${transactionId}/cancel`);
+      fetchTransactions();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to cancel');
+    }
+  };
+
+  const isPast = (iso) => iso && new Date(iso) < new Date();
+
+  const statusLabel = (s) => ({
+    awaiting_transfer: 'Awaiting transfer',
+    transferred: 'Ticket sent',
+    completed: 'Completed',
+    cancelled: 'Cancelled / refunded',
+    escrow_held: 'In escrow',
+  }[s] || s);
+
+  const statusColor = (s) => ({
+    awaiting_transfer: 'bg-yellow-100 text-yellow-800',
+    transferred: 'bg-blue-100 text-blue-800',
+    completed: 'bg-green-100 text-green-800',
+    cancelled: 'bg-gray-200 text-gray-700',
+  }[s] || 'bg-blue-100 text-blue-800');
+
   return (
     <div className="min-h-screen bg-gray-50 py-12">
       <div className="max-w-6xl mx-auto px-4">
@@ -164,12 +201,30 @@ export default function Dashboard({ user }) {
                               <p className="font-medium text-gray-900">{t.listing?.title || 'Listing'}</p>
                               <p className="text-sm text-gray-500">${t.amount.toFixed(2)} · {new Date(t.created_at).toLocaleDateString()}</p>
                             </div>
-                            <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-800">{t.status}</span>
+                            <span className={`text-xs px-2 py-1 rounded ${statusColor(t.status)}`}>{statusLabel(t.status)}</span>
                           </div>
-                          {t.status === 'escrow_held' && (
+
+                          {t.status === 'awaiting_transfer' && !isPast(t.transfer_deadline) && (
+                            <p className="mt-3 text-sm text-gray-600">Waiting for the seller to transfer your ticket. You'll be able to confirm receipt once they do.</p>
+                          )}
+                          {t.status === 'awaiting_transfer' && isPast(t.transfer_deadline) && (
+                            <div className="mt-3">
+                              <p className="text-sm text-red-700 mb-2">The seller missed the transfer window. You can cancel and get refunded.</p>
+                              <button onClick={() => handleCancel(t.id)} className="w-full px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium text-sm">
+                                Cancel & Refund Me
+                              </button>
+                            </div>
+                          )}
+                          {t.status === 'transferred' && (
                             <button onClick={() => handleConfirmReceipt(t.id)} className="mt-3 w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium text-sm">
                               ✓ I Received the Ticket
                             </button>
+                          )}
+                          {t.status === 'cancelled' && (
+                            <p className="mt-2 text-sm text-gray-600">This purchase was cancelled and refunded.</p>
+                          )}
+                          {t.status === 'completed' && t.auto_released && (
+                            <p className="mt-2 text-xs text-gray-500">Auto-completed after the confirmation window passed.</p>
                           )}
                           {t.status === 'completed' && !t.reviewed && (
                             <ReviewForm
@@ -191,12 +246,31 @@ export default function Dashboard({ user }) {
                   {sales.length > 0 ? (
                     <div className="space-y-3">
                       {sales.map((t) => (
-                        <div key={t.id} className="flex items-center justify-between p-4 border rounded-lg">
-                          <div>
-                            <p className="font-medium text-gray-900">{t.listing?.title || 'Listing'}</p>
-                            <p className="text-sm text-gray-500">${t.amount.toFixed(2)} · {new Date(t.created_at).toLocaleDateString()}</p>
+                        <div key={t.id} className="p-4 border rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-medium text-gray-900">{t.listing?.title || 'Listing'}</p>
+                              <p className="text-sm text-gray-500">${t.amount.toFixed(2)} · {new Date(t.created_at).toLocaleDateString()}</p>
+                            </div>
+                            <span className={`text-xs px-2 py-1 rounded ${statusColor(t.status)}`}>{statusLabel(t.status)}</span>
                           </div>
-                          <span className="text-xs px-2 py-1 rounded bg-purple-100 text-purple-800">{t.status}</span>
+                          {t.status === 'awaiting_transfer' && (
+                            <div className="mt-3">
+                              <p className="text-sm text-gray-600 mb-2">Transfer the ticket to the buyer via Ticketmaster, then mark it here so they can confirm.</p>
+                              <button onClick={() => handleMarkTransferred(t.id)} className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium text-sm">
+                                I've Transferred the Ticket
+                              </button>
+                            </div>
+                          )}
+                          {t.status === 'transferred' && (
+                            <p className="mt-2 text-sm text-gray-600">Waiting for the buyer to confirm receipt. Payment releases on confirmation (or automatically after the window).</p>
+                          )}
+                          {t.status === 'completed' && (
+                            <p className="mt-2 text-sm text-green-700">✓ Sale complete — payment released.</p>
+                          )}
+                          {t.status === 'cancelled' && (
+                            <p className="mt-2 text-sm text-gray-600">Buyer cancelled after the transfer window; they were refunded.</p>
+                          )}
                         </div>
                       ))}
                     </div>

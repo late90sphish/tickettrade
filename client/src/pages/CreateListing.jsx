@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { PHISH_SHOWS } from '../data/phishShows';
+import { PHISH_SHOWS, UPCOMING_SHOWS } from '../data/phishShows';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 
@@ -83,7 +83,7 @@ show_date: formData.show_date,
               setFormData(prev => ({ ...prev, show_id: e.target.value, show_date: show?.date }));
             }} className="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
               <option value="">Select a show...</option>
-              {PHISH_SHOWS.map(show => (
+              {UPCOMING_SHOWS.map(show => (
                 <option key={show.id} value={show.id}>{new Date(show.date).toLocaleDateString()} - {show.venue}</option>
               ))}
             </select>

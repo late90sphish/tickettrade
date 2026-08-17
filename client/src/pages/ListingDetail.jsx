@@ -100,6 +100,24 @@ export default function ListingDetail() {
 
   const totalBuyerPays = listing ? (listing.seller_covers_fees ? listing.asking_price : listing.asking_price + (listing.asking_price * 0.054) + 0.30) : 0;
 
+  // Late-purchase warning: is the show within ~24h? (date-level; showtime treated as end of show day)
+  const showIsSoon = (() => {
+    if (!listing || !listing.show_date) return false;
+    const showEnd = new Date(listing.show_date + 'T23:59:59');
+    const hoursUntil = (showEnd - new Date()) / 36e5;
+    return hoursUntil <= 24;
+  })();
+
+  const startPayment = () => {
+    if (showIsSoon) {
+      const ok = window.confirm(
+        "Heads up: this show is within 24 hours.\n\nBuying this close to showtime is riskier \u2014 there may be little time for the seller to transfer the ticket and for you to confirm before the show. Only continue if you're confident there\'s enough time.\n\nContinue with purchase?"
+      );
+      if (!ok) return;
+    }
+    setShowPayment(true);
+  };
+
   if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="text-center"><div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div><p className="mt-4">Loading listing...</p></div></div>;
 
   if (!listing) return <div className="min-h-screen bg-gray-50 py-12"><div className="max-w-4xl mx-auto px-4"><div className="bg-white rounded-lg p-8 text-center"><h1 className="text-2xl font-bold mb-2">Listing Not Found</h1><p className="text-gray-600 mb-4">{error}</p><button onClick={() => navigate('/')} className="px-6 py-2 bg-blue-600 text-white rounded-lg">Back</button></div></div></div>;
@@ -148,6 +166,11 @@ export default function ListingDetail() {
           <div>
             <div className="bg-white rounded-lg shadow p-6 mb-6 sticky top-20">
               <div className="mb-6">
+                {showIsSoon && (
+                  <div className="mb-4 p-3 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-800">
+                    ⚠️ This show is within 24 hours. Buying this close to showtime leaves little margin for transfer &amp; confirmation — proceed only if there's enough time.
+                  </div>
+                )}
                 <p className="text-sm text-gray-600 mb-2">Total you'll pay:</p>
                 <p className="text-4xl font-bold text-green-600 mb-1">${totalBuyerPays.toFixed(2)}</p>
                 <p className="text-xs text-gray-500">{listing.seller_covers_fees ? 'Seller covers fees' : 'Includes platform & processing fees'}</p>
@@ -195,7 +218,7 @@ export default function ListingDetail() {
                   !showOfferForm ? (
                     <>
                       <button onClick={() => setShowOfferForm(true)} className="w-full px-4 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium mb-2">Make Offer</button>
-                      <button onClick={() => setShowPayment(true)} className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Pay Full Price</button>
+                      <button onClick={startPayment} className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Pay Full Price</button>
                     </>
                   ) : (
                     <form onSubmit={handleMakeOffer} className="space-y-3">
@@ -210,7 +233,7 @@ export default function ListingDetail() {
                     </form>
                   )
                 ) : (
-                  <button onClick={() => setShowPayment(true)} className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Pay ${totalBuyerPays.toFixed(2)}</button>
+                  <button onClick={startPayment} className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Pay ${totalBuyerPays.toFixed(2)}</button>
                 )
               )}
 

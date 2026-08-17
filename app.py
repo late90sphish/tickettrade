@@ -170,7 +170,12 @@ class Transaction(db.Model):
     stripe_payment_intent = db.Column(db.String(255))
     status = db.Column(db.String(20), default='pending')
     escrow_held_at = db.Column(db.DateTime)
+    transferred_at = db.Column(db.DateTime)
+    transfer_deadline = db.Column(db.DateTime)
+    confirm_deadline = db.Column(db.DateTime)
     buyer_confirmed_at = db.Column(db.DateTime)
+    cancelled_at = db.Column(db.DateTime)
+    auto_released = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     completed_at = db.Column(db.DateTime)
     def to_dict(self):
@@ -184,7 +189,12 @@ class Transaction(db.Model):
             'status': self.status,
             'created_at': self.created_at.isoformat(),
             'escrow_held_at': self.escrow_held_at.isoformat() if self.escrow_held_at else None,
+            'transferred_at': self.transferred_at.isoformat() if self.transferred_at else None,
+            'transfer_deadline': self.transfer_deadline.isoformat() if self.transfer_deadline else None,
+            'confirm_deadline': self.confirm_deadline.isoformat() if self.confirm_deadline else None,
             'buyer_confirmed_at': self.buyer_confirmed_at.isoformat() if self.buyer_confirmed_at else None,
+            'cancelled_at': self.cancelled_at.isoformat() if self.cancelled_at else None,
+            'auto_released': self.auto_released,
             'reviewed': Review.query.filter_by(transaction_id=self.id).first() is not None,
         }
 
@@ -211,6 +221,58 @@ class Review(db.Model):
             'comment': self.comment,
             'created_at': self.created_at.isoformat(),
         }
+
+
+# ==================== ESCROW DEADLINE HELPERS ====================
+
+TRANSFER_WINDOW_HOURS = 24   # seller has this long to transfer after purchase
+CONFIRM_WINDOW_HOURS = 24    # buyer has this long to confirm after transfer
+
+
+def _showtime_for(transaction):
+    """Best-effort datetime of the show for this transaction's listing, or None."""
+    listing = Listing.query.get(transaction.listing_id)
+    if not listing or not listing.show_date:
+        return None
+    try:
+        # show_date is stored as 'YYYY-MM-DD'; treat showtime as end of that day
+        d = datetime.strptime(listing.show_date, '%Y-%m-%d')
+        return d.replace(hour=23, minute=59, second=59)
+    except (ValueError, TypeError):
+        return None
+
+
+def _deadline_from(start, window_hours, transaction):
+    """A deadline `window_hours` after `start`, but never later than showtime.
+    If it's already within the window of showtime, the deadline is showtime itself."""
+    normal = start + timedelta(hours=window_hours)
+    showtime = _showtime_for(transaction)
+    deadline = normal
+    if showtime and normal > showtime:
+        deadline = showtime
+    # Never hand back an already-expired (or effectively-zero) deadline: always
+    # give at least a minimum window from "start", even for same-day/late shows.
+    minimum = start + timedelta(hours=1)
+    if deadline < minimum:
+        deadline = minimum
+    return deadline
+
+
+def enforce_deadlines(transaction):
+    """Lazy deadline enforcement: called whenever a transaction is loaded.
+    - If seller missed the transfer deadline, the transaction is left in
+      awaiting_transfer but the buyer will see a cancel/refund option (handled in UI/route).
+    - If the buyer missed the confirm deadline after a transfer, auto-release to seller.
+    Returns True if it changed state (caller should commit)."""
+    now = datetime.utcnow()
+    changed = False
+    if transaction.status == 'transferred' and transaction.confirm_deadline and now > transaction.confirm_deadline:
+        transaction.status = 'completed'
+        transaction.buyer_confirmed_at = now
+        transaction.completed_at = now
+        transaction.auto_released = True
+        changed = True
+    return changed
 
 
 # ==================== AUTH ROUTES ====================
@@ -409,13 +471,68 @@ def confirm_received(transaction_id):
         return jsonify({'error': 'Transaction not found'}), 404
     if transaction.buyer_id != buyer_id:
         return jsonify({'error': 'Unauthorized'}), 403
-    if transaction.status != 'escrow_held':
-        return jsonify({'error': 'Transaction not in escrow'}), 400
-    
+    # Buyer can confirm receipt only after the seller has marked the ticket transferred.
+    if transaction.status != 'transferred':
+        return jsonify({'error': 'Ticket has not been marked as transferred yet'}), 400
+
+    now = datetime.utcnow()
     transaction.status = 'completed'
-    transaction.buyer_confirmed_at = datetime.utcnow()
+    transaction.buyer_confirmed_at = now
+    transaction.completed_at = now
     db.session.commit()
     return jsonify({'message': 'Transaction completed', 'transaction': transaction.to_dict()}), 200
+
+
+@app.route('/api/transactions/<transaction_id>/mark-transferred', methods=['POST'])
+@jwt_required()
+def mark_transferred(transaction_id):
+    seller_id = get_jwt_identity()
+    transaction = Transaction.query.get(transaction_id)
+    if not transaction:
+        return jsonify({'error': 'Transaction not found'}), 404
+    if transaction.seller_id != seller_id:
+        return jsonify({'error': 'Only the seller can mark the ticket transferred'}), 403
+    if transaction.status != 'awaiting_transfer':
+        return jsonify({'error': 'Transaction is not awaiting transfer'}), 400
+
+    now = datetime.utcnow()
+    transaction.status = 'transferred'
+    transaction.transferred_at = now
+    transaction.confirm_deadline = _deadline_from(now, CONFIRM_WINDOW_HOURS, transaction)
+    db.session.commit()
+    return jsonify({'message': 'Marked as transferred', 'transaction': transaction.to_dict()}), 200
+
+
+@app.route('/api/transactions/<transaction_id>/cancel', methods=['POST'])
+@jwt_required()
+def cancel_transaction(transaction_id):
+    buyer_id = get_jwt_identity()
+    transaction = Transaction.query.get(transaction_id)
+    if not transaction:
+        return jsonify({'error': 'Transaction not found'}), 404
+    if transaction.buyer_id != buyer_id:
+        return jsonify({'error': 'Only the buyer can cancel'}), 403
+    if transaction.status != 'awaiting_transfer':
+        return jsonify({'error': 'This purchase can no longer be cancelled'}), 400
+    # Only allowed once the seller has missed the transfer deadline.
+    now = datetime.utcnow()
+    if not transaction.transfer_deadline or now <= transaction.transfer_deadline:
+        return jsonify({'error': 'The seller still has time to transfer the ticket'}), 400
+
+    # Refund the buyer via Stripe.
+    try:
+        stripe.Refund.create(payment_intent=transaction.stripe_payment_intent)
+    except Exception as e:
+        return jsonify({'error': 'Refund failed: ' + str(e)}), 400
+
+    transaction.status = 'cancelled'
+    transaction.cancelled_at = now
+    # Put the listing back on the market.
+    listing = Listing.query.get(transaction.listing_id)
+    if listing:
+        listing.status = 'active'
+    db.session.commit()
+    return jsonify({'message': 'Purchase cancelled and refunded', 'transaction': transaction.to_dict()}), 200
 
 
 @app.route('/api/reviews', methods=['POST'])
@@ -516,6 +633,14 @@ def get_my_transactions():
     purchases = Transaction.query.filter_by(buyer_id=user_id).order_by(Transaction.created_at.desc()).all()
     sales = Transaction.query.filter_by(seller_id=user_id).order_by(Transaction.created_at.desc()).all()
 
+    # Lazy deadline enforcement: auto-release any transfers the buyer never confirmed in time.
+    dirty = False
+    for txn in list(purchases) + list(sales):
+        if enforce_deadlines(txn):
+            dirty = True
+    if dirty:
+        db.session.commit()
+
     def enrich(txn):
         data = txn.to_dict()
         listing = Listing.query.get(txn.listing_id)
@@ -585,15 +710,17 @@ def confirm_payment():
         return jsonify({'message': 'Already recorded', 'transaction': existing.to_dict()}), 200
 
     try:
+        now = datetime.utcnow()
         transaction = Transaction(
             listing_id=listing.id,
             seller_id=listing.seller_id,
             buyer_id=buyer_id,
             amount=intent.amount / 100.0,
             stripe_payment_intent=data['payment_intent_id'],
-            status='escrow_held',
-            escrow_held_at=datetime.utcnow()
+            status='awaiting_transfer',
+            escrow_held_at=now,
         )
+        transaction.transfer_deadline = _deadline_from(now, TRANSFER_WINDOW_HOURS, transaction)
         db.session.add(transaction)
         listing.status = 'sold'
         db.session.commit()

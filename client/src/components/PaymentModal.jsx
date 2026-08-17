@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useStripe, useElements, CardElement } from '@stripe/react-stripe-js';
 import axios from 'axios';
 
@@ -9,9 +9,12 @@ export default function PaymentModal({ listing, amount, onClose, onSuccess }) {
   const elements = useElements();
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
+  const inFlight = useRef(false); // synchronous guard against double-submit
 
   const handlePay = async () => {
     if (!stripe || !elements) return; // Stripe.js not loaded yet
+    if (inFlight.current) return;     // already charging - ignore extra clicks
+    inFlight.current = true;
     setError(null);
     setProcessing(true);
     try {
@@ -47,6 +50,7 @@ export default function PaymentModal({ listing, amount, onClose, onSuccess }) {
       setError(err.response?.data?.error || err.message || 'Something went wrong');
     } finally {
       setProcessing(false);
+      inFlight.current = false;
     }
   };
 
