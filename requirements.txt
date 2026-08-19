@@ -6,3 +6,7 @@ python-dotenv>=1.0
 stripe>=7.0
 Werkzeug>=3.0
 SQLAlchemy>=2.0
+
+gunicorn==23.0.0
+
+gunicorn==23.0.0
