@@ -10,12 +10,16 @@ export default function Dashboard({ user }) {
   const [offers, setOffers] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [sales, setSales] = useState([]);
+  const [tradeOffers, setTradeOffers] = useState({ incoming: [], outgoing: [] });
+  const [swaps, setSwaps] = useState([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (tab === 'listings') fetchListings();
     if (tab === 'offers') fetchOffers();
     if (tab === 'purchases') fetchTransactions();
+    if (tab === 'trades') fetchTradeOffers();
+    if (tab === 'swaps') fetchSwaps();
   }, [tab]);
 
   const fetchListings = async () => {
@@ -52,6 +56,68 @@ export default function Dashboard({ user }) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTradeOffers = async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get('/api/trades/mine');
+      setTradeOffers({ incoming: res.data.incoming || [], outgoing: res.data.outgoing || [] });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchSwaps = async () => {
+    setLoading(true);
+    try {
+      const res = await axios.get('/api/swaps/mine');
+      setSwaps(res.data.swaps || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAcceptTrade = async (offerId) => {
+    try {
+      await axios.post(`/api/trades/${offerId}/accept`);
+      fetchTradeOffers();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to accept trade');
+    }
+  };
+
+  const handleRejectTrade = async (offerId) => {
+    try {
+      await axios.post(`/api/trades/${offerId}/reject`);
+      fetchTradeOffers();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to reject trade');
+    }
+  };
+
+  const handleSwapTransferred = async (swapId) => {
+    if (!window.confirm('Confirm you have transferred your ticket to the other person?')) return;
+    try {
+      await axios.post(`/api/swaps/${swapId}/mark-transferred`);
+      fetchSwaps();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to mark transferred');
+    }
+  };
+
+  const handleSwapConfirmed = async (swapId) => {
+    if (!window.confirm('Confirm you received their ticket? This completes your side of the trade.')) return;
+    try {
+      await axios.post(`/api/swaps/${swapId}/confirm-received`);
+      fetchSwaps();
+    } catch (err) {
+      alert(err.response?.data?.error || 'Failed to confirm receipt');
     }
   };
 
@@ -141,6 +207,8 @@ export default function Dashboard({ user }) {
               <button onClick={() => setTab('listings')} className={`px-6 py-4 font-medium ${tab === 'listings' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}>My Listings</button>
               <button onClick={() => setTab('offers')} className={`px-6 py-4 font-medium ${tab === 'offers' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}>Offers Received</button>
               <button onClick={() => setTab('purchases')} className={`px-6 py-4 font-medium ${tab === 'purchases' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}>Purchases &amp; Sales</button>
+              <button onClick={() => setTab('trades')} className={`px-6 py-4 font-medium ${tab === 'trades' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}>Trades</button>
+              <button onClick={() => setTab('swaps')} className={`px-6 py-4 font-medium ${tab === 'swaps' ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-600'}`}>Active Swaps</button>
             </div>
           </div>
 
@@ -277,6 +345,136 @@ export default function Dashboard({ user }) {
                   ) : <p className="text-sm text-gray-500">No sales yet.</p>}
                 </div>
               </div>
+            )}
+
+            {!loading && tab === 'trades' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-3">Incoming Trade Offers</h3>
+                  {tradeOffers.incoming.length > 0 ? (
+                    <div className="space-y-3">
+                      {tradeOffers.incoming.map((o) => (
+                        <div key={o.id} className="p-4 border rounded-lg">
+                          <div className="flex items-center justify-between mb-2">
+                            <div>
+                              <p className="text-sm text-gray-600"><span className="font-medium text-gray-900">{o.proposer?.username}</span> wants your ticket:</p>
+                              <p className="font-medium text-gray-900">{o.target_listing?.title}</p>
+                              <p className="text-sm text-gray-600 mt-2">They offer:</p>
+                              <p className="font-medium text-purple-700">{o.offered_listing?.title} <span className="text-gray-500 font-normal">(${o.offered_listing?.asking_price?.toFixed(2)})</span></p>
+                              {o.message && <p className="text-sm text-gray-500 mt-1 italic">"{o.message}"</p>}
+                            </div>
+                            <span className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-800">{o.status}</span>
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button onClick={() => handleAcceptTrade(o.id)} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium">Accept Trade</button>
+                            <button onClick={() => handleRejectTrade(o.id)} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">Reject</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p className="text-sm text-gray-500">No incoming trade offers.</p>}
+                </div>
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-3">Outgoing Trade Offers</h3>
+                  {tradeOffers.outgoing.length > 0 ? (
+                    <div className="space-y-3">
+                      {tradeOffers.outgoing.map((o) => (
+                        <div key={o.id} className="p-4 border rounded-lg">
+                          <div className="flex items-center justify-between mb-2">
+                            <div>
+                              <p className="text-sm text-gray-600">You offered:</p>
+                              <p className="font-medium text-purple-700">{o.offered_listing?.title}</p>
+                              <p className="text-sm text-gray-600 mt-2">For their ticket:</p>
+                              <p className="font-medium text-gray-900">{o.target_listing?.title} <span className="text-gray-500 font-normal">(${o.target_listing?.asking_price?.toFixed(2)})</span></p>
+                              {o.message && <p className="text-sm text-gray-500 mt-1 italic">"{o.message}"</p>}
+                            </div>
+                            <span className="text-xs px-2 py-1 rounded bg-yellow-100 text-yellow-800">{o.status}</span>
+                          </div>
+                          <div className="flex gap-2 mt-3">
+                            <button onClick={() => handleRejectTrade(o.id)} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm">Withdraw</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : <p className="text-sm text-gray-500">No outgoing trade offers.</p>}
+                </div>
+              </div>
+            )}
+
+            {!loading && tab === 'swaps' && (
+              swaps.length > 0 ? (
+                <div className="space-y-4">
+                  {swaps.map((sw) => {
+                    const you = sw.you;
+                    if (!you) return null;
+                    const done = sw.status === 'completed';
+                    return (
+                      <div key={sw.id} className="p-4 border rounded-lg">
+                        <div className="flex items-center justify-between mb-4">
+                          <p className="font-medium text-gray-900">Trade with {you.other_user?.username}</p>
+                          <span className={`text-xs px-2 py-1 rounded ${done ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>{done ? 'Completed' : 'In progress'}</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                          <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                            <p className="text-xs text-gray-600 mb-1">You give</p>
+                            <p className="font-medium text-gray-900 text-sm">{you.your_listing?.title}</p>
+                          </div>
+                          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                            <p className="text-xs text-gray-600 mb-1">You get</p>
+                            <p className="font-medium text-gray-900 text-sm">{you.their_listing?.title}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 mb-4">
+                          <div>
+                            <p className="text-xs font-medium text-gray-500 mb-2">YOUR STATUS</p>
+                            <div className={`flex items-center gap-2 text-sm mb-1 ${you.you_transferred ? 'text-green-700' : 'text-gray-400'}`}>
+                              <span>{you.you_transferred ? '✓' : '○'}</span> You transferred
+                            </div>
+                            <div className={`flex items-center gap-2 text-sm ${you.you_confirmed ? 'text-green-700' : 'text-gray-400'}`}>
+                              <span>{you.you_confirmed ? '✓' : '○'}</span> You confirmed receipt
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs font-medium text-gray-500 mb-2">THEIR STATUS</p>
+                            <div className={`flex items-center gap-2 text-sm mb-1 ${you.they_transferred ? 'text-green-700' : 'text-gray-400'}`}>
+                              <span>{you.they_transferred ? '✓' : '○'}</span> They transferred
+                            </div>
+                            <div className={`flex items-center gap-2 text-sm ${you.they_confirmed ? 'text-green-700' : 'text-gray-400'}`}>
+                              <span>{you.they_confirmed ? '✓' : '○'}</span> They confirmed receipt
+                            </div>
+                          </div>
+                        </div>
+
+                        {!done && (
+                          <div className="flex gap-2">
+                            {!you.you_transferred && (
+                              <button onClick={() => handleSwapTransferred(sw.id)} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+                                I've Transferred My Ticket
+                              </button>
+                            )}
+                            {you.you_transferred && !you.you_confirmed && (
+                              <button
+                                onClick={() => handleSwapConfirmed(sw.id)}
+                                disabled={!you.they_transferred}
+                                title={!you.they_transferred ? 'Wait for them to transfer first' : ''}
+                                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+                              >
+                                {you.they_transferred ? "I've Received Their Ticket" : 'Waiting for them to send...'}
+                              </button>
+                            )}
+                            {you.you_transferred && you.you_confirmed && (
+                              <p className="text-sm text-gray-600">Your side is done — waiting for them to finish.</p>
+                            )}
+                          </div>
+                        )}
+                        {done && <p className="text-sm text-green-700 font-medium">✓ Trade completed — both sides confirmed.</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <div className="text-center py-12 text-gray-500">No active swaps. Accept a trade offer to start one.</div>
             )}
           </div>
         </div>

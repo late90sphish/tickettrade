@@ -88,6 +88,7 @@ class Listing(db.Model):
     asking_price = db.Column(db.Float, nullable=False)
     status = db.Column(db.String(20), default='active')
     accepts_offers = db.Column(db.Boolean, default=True)
+    allow_trades = db.Column(db.Boolean, default=False)
     seller_covers_fees = db.Column(db.Boolean, default=True)
     show_id = db.Column(db.Integer)
     show_date = db.Column(db.String(10))
@@ -109,6 +110,7 @@ class Listing(db.Model):
             'asking_price': self.asking_price,
             'status': self.status,
             'accepts_offers': self.accepts_offers,
+            'allow_trades': self.allow_trades,
             'images': [img.to_dict() for img in self.images],
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
@@ -221,6 +223,85 @@ class Review(db.Model):
             'comment': self.comment,
             'created_at': self.created_at.isoformat(),
         }
+
+
+class TradeOffer(db.Model):
+    __tablename__ = 'trade_offers'
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    # The listing the proposer wants (target) and the listing they offer (offered).
+    target_listing_id = db.Column(db.String(36), db.ForeignKey('listings.id'), nullable=False, index=True)
+    offered_listing_id = db.Column(db.String(36), db.ForeignKey('listings.id'), nullable=False)
+    proposer_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    target_owner_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    status = db.Column(db.String(20), default='pending')  # pending | accepted | rejected | withdrawn
+    message = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        target = Listing.query.get(self.target_listing_id)
+        offered = Listing.query.get(self.offered_listing_id)
+        proposer = User.query.get(self.proposer_id)
+        return {
+            'id': self.id,
+            'target_listing': target.to_dict() if target else None,
+            'offered_listing': offered.to_dict() if offered else None,
+            'proposer': proposer.to_dict() if proposer else None,
+            'proposer_id': self.proposer_id,
+            'target_owner_id': self.target_owner_id,
+            'status': self.status,
+            'message': self.message,
+            'created_at': self.created_at.isoformat(),
+        }
+
+
+class TradeSwap(db.Model):
+    __tablename__ = 'trade_swaps'
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    trade_offer_id = db.Column(db.String(36), db.ForeignKey('trade_offers.id'))
+    # The two parties and their respective listings being swapped.
+    user_a_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    listing_a_id = db.Column(db.String(36), db.ForeignKey('listings.id'), nullable=False)
+    user_b_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False, index=True)
+    listing_b_id = db.Column(db.String(36), db.ForeignKey('listings.id'), nullable=False)
+    # Mirrored escrow: each side marks transferred + confirmed independently.
+    a_transferred = db.Column(db.Boolean, default=False)
+    b_transferred = db.Column(db.Boolean, default=False)
+    a_confirmed = db.Column(db.Boolean, default=False)  # A confirms receiving B's ticket
+    b_confirmed = db.Column(db.Boolean, default=False)  # B confirms receiving A's ticket
+    status = db.Column(db.String(20), default='in_progress')  # in_progress | completed | cancelled
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime)
+
+    def to_dict(self, viewer_id=None):
+        la = Listing.query.get(self.listing_a_id)
+        lb = Listing.query.get(self.listing_b_id)
+        ua = User.query.get(self.user_a_id)
+        ub = User.query.get(self.user_b_id)
+        data = {
+            'id': self.id,
+            'user_a': ua.to_dict() if ua else None,
+            'user_b': ub.to_dict() if ub else None,
+            'listing_a': la.to_dict() if la else None,
+            'listing_b': lb.to_dict() if lb else None,
+            'a_transferred': self.a_transferred,
+            'b_transferred': self.b_transferred,
+            'a_confirmed': self.a_confirmed,
+            'b_confirmed': self.b_confirmed,
+            'status': self.status,
+            'created_at': self.created_at.isoformat(),
+        }
+        # Add a "you" perspective so the frontend can render the right buttons.
+        if viewer_id == self.user_a_id:
+            data['you'] = {'role': 'a', 'your_listing': data['listing_a'], 'their_listing': data['listing_b'],
+                           'you_transferred': self.a_transferred, 'you_confirmed': self.a_confirmed,
+                           'they_transferred': self.b_transferred, 'they_confirmed': self.b_confirmed,
+                           'other_user': data['user_b']}
+        elif viewer_id == self.user_b_id:
+            data['you'] = {'role': 'b', 'your_listing': data['listing_b'], 'their_listing': data['listing_a'],
+                           'you_transferred': self.b_transferred, 'you_confirmed': self.b_confirmed,
+                           'they_transferred': self.a_transferred, 'they_confirmed': self.a_confirmed,
+                           'other_user': data['user_a']}
+        return data
 
 
 # ==================== ESCROW DEADLINE HELPERS ====================
@@ -369,7 +450,7 @@ def create_listing():
     if data['asking_price'] > max_allowed:
         return jsonify({'error': 'Asking price cannot exceed face value plus fees'}), 400
     
-    listing = Listing(seller_id=user_id, title=data['title'], description=data.get('description', ''), category=data.get('category', 'Phish'), condition=data.get('condition', 'good'), original_purchase_price=data['original_purchase_price'], asking_price=data['asking_price'], accepts_offers=data.get('accepts_offers', True), seller_covers_fees=data.get('seller_covers_fees', True), show_id=data.get('show_id'), show_date=data.get('show_date'))
+    listing = Listing(seller_id=user_id, title=data['title'], description=data.get('description', ''), category=data.get('category', 'Phish'), condition=data.get('condition', 'good'), original_purchase_price=data['original_purchase_price'], asking_price=data['asking_price'], accepts_offers=data.get('accepts_offers', True), allow_trades=data.get('allow_trades', False), seller_covers_fees=data.get('seller_covers_fees', True), show_id=data.get('show_id'), show_date=data.get('show_date'))
     db.session.add(listing)
     db.session.commit()
     return jsonify(listing.to_dict()), 201
@@ -589,6 +670,189 @@ def get_user(user_id):
     if not user:
         return jsonify({'error': 'User not found'}), 404
     return jsonify(user.to_dict()), 200
+
+
+@app.route('/api/trades', methods=['POST'])
+@jwt_required()
+def propose_trade():
+    proposer_id = get_jwt_identity()
+    data = request.get_json()
+    target_id = data.get('target_listing_id')
+    offered_id = data.get('offered_listing_id')
+    if not target_id or not offered_id:
+        return jsonify({'error': 'Missing target or offered listing'}), 400
+
+    target = Listing.query.get(target_id)
+    offered = Listing.query.get(offered_id)
+    if not target or not offered:
+        return jsonify({'error': 'Listing not found'}), 404
+    if target.status != 'active':
+        return jsonify({'error': 'That listing is no longer available'}), 400
+    if offered.status != 'active':
+        return jsonify({'error': 'Your offered listing is not active'}), 400
+    if not target.allow_trades:
+        return jsonify({'error': 'That listing is not open to trades'}), 400
+    if offered.seller_id != proposer_id:
+        return jsonify({'error': 'You can only offer your own listing'}), 403
+    if target.seller_id == proposer_id:
+        return jsonify({'error': 'You cannot trade with yourself'}), 400
+    # Prevent duplicate pending offers for the same pair.
+    dupe = TradeOffer.query.filter_by(target_listing_id=target_id, offered_listing_id=offered_id, proposer_id=proposer_id, status='pending').first()
+    if dupe:
+        return jsonify({'error': 'You already have a pending offer for this trade'}), 400
+
+    offer = TradeOffer(
+        target_listing_id=target_id,
+        offered_listing_id=offered_id,
+        proposer_id=proposer_id,
+        target_owner_id=target.seller_id,
+        message=data.get('message', ''),
+    )
+    db.session.add(offer)
+    db.session.commit()
+    return jsonify(offer.to_dict()), 201
+
+
+@app.route('/api/trades/mine', methods=['GET'])
+@jwt_required()
+def my_trade_offers():
+    user_id = get_jwt_identity()
+    incoming = TradeOffer.query.filter_by(target_owner_id=user_id, status='pending').order_by(TradeOffer.created_at.desc()).all()
+    outgoing = TradeOffer.query.filter_by(proposer_id=user_id, status='pending').order_by(TradeOffer.created_at.desc()).all()
+    return jsonify({
+        'incoming': [o.to_dict() for o in incoming],
+        'outgoing': [o.to_dict() for o in outgoing],
+    }), 200
+
+
+@app.route('/api/trades/<offer_id>/accept', methods=['POST'])
+@jwt_required()
+def accept_trade(offer_id):
+    user_id = get_jwt_identity()
+    offer = TradeOffer.query.get(offer_id)
+    if not offer:
+        return jsonify({'error': 'Trade offer not found'}), 404
+    if offer.target_owner_id != user_id:
+        return jsonify({'error': 'Only the owner of the requested ticket can accept'}), 403
+    if offer.status != 'pending':
+        return jsonify({'error': 'This offer is no longer pending'}), 400
+
+    target = Listing.query.get(offer.target_listing_id)
+    offered = Listing.query.get(offer.offered_listing_id)
+    if not target or not offered or target.status != 'active' or offered.status != 'active':
+        return jsonify({'error': 'One of the listings is no longer available'}), 400
+
+    # Accept this offer; create the swap.
+    offer.status = 'accepted'
+    swap = TradeSwap(
+        trade_offer_id=offer.id,
+        user_a_id=offer.target_owner_id, listing_a_id=offer.target_listing_id,
+        user_b_id=offer.proposer_id, listing_b_id=offer.offered_listing_id,
+    )
+    db.session.add(swap)
+
+    # Take both listings off the market.
+    target.status = 'in_trade'
+    offered.status = 'in_trade'
+
+    # Auto-reject any other pending offers that involve either listing.
+    others = TradeOffer.query.filter(
+        TradeOffer.status == 'pending',
+        db.or_(
+            TradeOffer.target_listing_id.in_([target.id, offered.id]),
+            TradeOffer.offered_listing_id.in_([target.id, offered.id]),
+        ),
+    ).all()
+    for o in others:
+        o.status = 'rejected'
+
+    db.session.commit()
+    return jsonify({'message': 'Trade accepted', 'swap': swap.to_dict(viewer_id=user_id)}), 200
+
+
+@app.route('/api/trades/<offer_id>/reject', methods=['POST'])
+@jwt_required()
+def reject_trade(offer_id):
+    user_id = get_jwt_identity()
+    offer = TradeOffer.query.get(offer_id)
+    if not offer:
+        return jsonify({'error': 'Trade offer not found'}), 404
+    # Either the target owner can reject, or the proposer can withdraw.
+    if user_id not in (offer.target_owner_id, offer.proposer_id):
+        return jsonify({'error': 'Not authorized'}), 403
+    if offer.status != 'pending':
+        return jsonify({'error': 'This offer is no longer pending'}), 400
+    offer.status = 'withdrawn' if user_id == offer.proposer_id else 'rejected'
+    db.session.commit()
+    return jsonify({'message': 'Trade offer ' + offer.status}), 200
+
+
+def _finalize_swap_if_done(swap):
+    """If both sides transferred and both confirmed, complete the swap."""
+    if swap.a_transferred and swap.b_transferred and swap.a_confirmed and swap.b_confirmed and swap.status == 'in_progress':
+        swap.status = 'completed'
+        swap.completed_at = datetime.utcnow()
+        la = Listing.query.get(swap.listing_a_id)
+        lb = Listing.query.get(swap.listing_b_id)
+        if la: la.status = 'traded'
+        if lb: lb.status = 'traded'
+        return True
+    return False
+
+
+@app.route('/api/swaps/mine', methods=['GET'])
+@jwt_required()
+def my_swaps():
+    user_id = get_jwt_identity()
+    swaps = TradeSwap.query.filter(
+        db.or_(TradeSwap.user_a_id == user_id, TradeSwap.user_b_id == user_id)
+    ).order_by(TradeSwap.created_at.desc()).all()
+    return jsonify({'swaps': [sw.to_dict(viewer_id=user_id) for sw in swaps]}), 200
+
+
+@app.route('/api/swaps/<swap_id>/mark-transferred', methods=['POST'])
+@jwt_required()
+def swap_mark_transferred(swap_id):
+    user_id = get_jwt_identity()
+    swap = TradeSwap.query.get(swap_id)
+    if not swap:
+        return jsonify({'error': 'Swap not found'}), 404
+    if swap.status != 'in_progress':
+        return jsonify({'error': 'This swap is not in progress'}), 400
+    if user_id == swap.user_a_id:
+        swap.a_transferred = True
+    elif user_id == swap.user_b_id:
+        swap.b_transferred = True
+    else:
+        return jsonify({'error': 'Not part of this swap'}), 403
+    _finalize_swap_if_done(swap)
+    db.session.commit()
+    return jsonify({'message': 'Marked transferred', 'swap': swap.to_dict(viewer_id=user_id)}), 200
+
+
+@app.route('/api/swaps/<swap_id>/confirm-received', methods=['POST'])
+@jwt_required()
+def swap_confirm_received(swap_id):
+    user_id = get_jwt_identity()
+    swap = TradeSwap.query.get(swap_id)
+    if not swap:
+        return jsonify({'error': 'Swap not found'}), 404
+    if swap.status != 'in_progress':
+        return jsonify({'error': 'This swap is not in progress'}), 400
+    # You can only confirm receipt after the OTHER side has transferred.
+    if user_id == swap.user_a_id:
+        if not swap.b_transferred:
+            return jsonify({'error': 'The other person has not transferred their ticket yet'}), 400
+        swap.a_confirmed = True
+    elif user_id == swap.user_b_id:
+        if not swap.a_transferred:
+            return jsonify({'error': 'The other person has not transferred their ticket yet'}), 400
+        swap.b_confirmed = True
+    else:
+        return jsonify({'error': 'Not part of this swap'}), 403
+    _finalize_swap_if_done(swap)
+    db.session.commit()
+    return jsonify({'message': 'Receipt confirmed', 'swap': swap.to_dict(viewer_id=user_id)}), 200
 
 
 @app.route('/api/users/<user_id>/reviews', methods=['GET'])

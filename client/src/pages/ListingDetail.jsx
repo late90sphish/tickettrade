@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements } from '@stripe/react-stripe-js';
 import PaymentModal from '../components/PaymentModal';
+import ProposeTradeModal from '../components/ProposeTradeModal';
 import ReviewForm from '../components/ReviewForm';
+import { AuthContext } from '../context/AuthContext';
 
 let stripePromise = null;
 function getStripe() {
@@ -20,6 +22,8 @@ function getStripe() {
 export default function ListingDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useContext(AuthContext);
+  const [showTradeModal, setShowTradeModal] = useState(false);
   const [listing, setListing] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -237,6 +241,25 @@ export default function ListingDetail() {
                 )
               )}
 
+              {/* Trade option: only when the listing allows trades, someone is
+                  logged in, there's no active transaction, and it's not their own. */}
+              {listing.allow_trades && user && !transaction && listing.seller.id !== user.id && (
+                <div className="mt-3">
+                  <div className="relative flex items-center my-3">
+                    <div className="flex-grow border-t border-gray-200"></div>
+                    <span className="flex-shrink mx-3 text-xs text-gray-400">or</span>
+                    <div className="flex-grow border-t border-gray-200"></div>
+                  </div>
+                  <button
+                    onClick={() => setShowTradeModal(true)}
+                    className="w-full px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium"
+                  >
+                    🔄 Propose a Trade
+                  </button>
+                  <p className="text-xs text-gray-500 mt-2 text-center">Swap one of your tickets for this one</p>
+                </div>
+              )}
+
               <p className="text-xs text-gray-500 mt-4 text-center">💳 Secured by Stripe<br/>✓ Buyer protected with escrow</p>
             </div>
           </div>
@@ -260,6 +283,17 @@ export default function ListingDetail() {
             <button onClick={() => setShowPayment(false)} className="px-4 py-2 bg-gray-200 rounded-lg">Close</button>
           </div>
         </div>
+      )}
+
+      {showTradeModal && (
+        <ProposeTradeModal
+          targetListing={listing}
+          onClose={() => setShowTradeModal(false)}
+          onSuccess={() => {
+            setShowTradeModal(false);
+            alert('Trade proposed! You can track it in your Dashboard under the Trades tab.');
+          }}
+        />
       )}
     </div>
   );

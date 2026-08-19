@@ -15,6 +15,7 @@ export default function CreateListing() {
     original_purchase_price: '',
     asking_price: '',
     accepts_offers: true,
+    allow_trades: false,
     show_id: '',
 show_date: '',
   });
@@ -44,6 +45,7 @@ show_date: '',
         original_purchase_price: parseFloat(formData.original_purchase_price),
         asking_price: parseFloat(formData.asking_price),
         accepts_offers: formData.accepts_offers,
+        allow_trades: formData.allow_trades,
         seller_covers_fees: coverFees,
         show_id: parseInt(formData.show_id),
 show_date: formData.show_date,
@@ -137,6 +139,17 @@ show_date: formData.show_date,
               </div>
             </label>
           </div>
+
+          <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" name="allow_trades" checked={formData.allow_trades} onChange={(e) => setFormData(prev => ({ ...prev, allow_trades: e.target.checked }))} className="w-5 h-5 text-purple-600 rounded" />
+              <div>
+                <p className="font-medium text-gray-900">{formData.allow_trades ? '✓ Open to Trades' : '✗ Not Open to Trades'}</p>
+                <p className="text-sm text-gray-600">{formData.allow_trades ? 'Other users can offer to swap one of their tickets for this one' : 'This ticket is for sale only, no trades'}</p>
+              </div>
+            </label>
+          </div>
+
           <button type="submit" disabled={loading} className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium text-lg">
             {loading ? 'Creating...' : 'Create Listing'}
           </button>
