@@ -12,8 +12,23 @@ import stripe
 load_dotenv()
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///tickettrade.db')
+
+# Database: use DATABASE_URL from the environment in production (Postgres),
+# fall back to a local SQLite file for development.
+database_url = os.getenv('DATABASE_URL', 'sqlite:///tickettrade.db')
+# Some hosts (Render, Heroku, Railway) provide a URL starting with "postgres://",
+# but SQLAlchemy requires "postgresql://". Normalize it so either works.
+if database_url.startswith('postgres://'):
+    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Recycle pooled connections and check them before use. Managed Postgres
+# services drop idle connections; without this you get intermittent errors.
+if database_url.startswith('postgresql://'):
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'pool_pre_ping': True,
+        'pool_recycle': 280,
+    }
 app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'dev-secret-key')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
