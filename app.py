@@ -34,7 +34,8 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 db = SQLAlchemy(app)
 jwt = JWTManager(app)
-CORS(app)
+allowed_origins = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
+CORS(app, origins=allowed_origins)
 
 stripe.api_key = os.getenv('STRIPE_SECRET_KEY')  # optional in local dev; payment routes handle missing key
 
